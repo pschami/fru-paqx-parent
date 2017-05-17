@@ -1,9 +1,5 @@
 package com.dell.cpsd.paqx.fru.amqp.consumer.handler;
 
-/**
- * Created by taylorswift on 5/11/17.
- */
-
 import com.dell.converged.capabilities.compute.discovered.nodes.api.NodeEventDiscovered;
 import com.dell.cpsd.paqx.fru.amqp.config.NodeDiscoveredAmqpConfig;
 import com.dell.cpsd.paqx.fru.rest.repository.InMemoryNodeDiscoveredRepository;

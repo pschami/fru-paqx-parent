@@ -81,7 +81,7 @@ public class vCenterServiceImpl implements vCenterService
             @Qualifier(value = "vCenterConsulRegisterResponseHandler") final AsyncAcknowledgement consulRegisterAsyncAcknowledgement,
             @Qualifier(value = "vCenterDestroyVmResponseHandler") final AsyncAcknowledgement vmDeletionAsyncAcknowledgement,
             @Qualifier(value = "vCenterHostPowerOperationResponseHandler") final AsyncAcknowledgement vCenterHostPowerAsyncAcknowledgement,
-            @Qualifier(value = "hostMaintenanceModeResponseHandler") final AsyncAcknowledgement hostMaintenanceModeAsyncAcknowledgement,
+            @Qualifier(value = "vCenterHostMaintenanceModeResponseHandler") final AsyncAcknowledgement hostMaintenanceModeAsyncAcknowledgement,
             @Qualifier(value = "vCenterClusterOperationsResponseHandler") final AsyncAcknowledgement vcenterClusterOperationAsyncAcknowledgement,
             @Qualifier(value = "replyTo") final String replyTo)
     {

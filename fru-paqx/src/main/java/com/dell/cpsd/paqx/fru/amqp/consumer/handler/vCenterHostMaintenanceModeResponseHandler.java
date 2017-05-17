@@ -24,13 +24,13 @@ import static com.dell.cpsd.paqx.fru.amqp.config.RabbitConfig.EXCHANGE_FRU_RESPO
  * @version 1.0
  * @since 1.0
  */
-public class HostMaintenanceModeResponseHandler extends DefaultMessageHandler<HostMaintenanceModeResponseMessage>
+public class vCenterHostMaintenanceModeResponseHandler extends DefaultMessageHandler<HostMaintenanceModeResponseMessage>
         implements AsyncAcknowledgement<HostMaintenanceModeResponse> {
     private static final Logger LOG = LoggerFactory
             .getLogger(VCenterDestroyVmResponseHandler.class);
     private Map<String, CompletableFuture<HostMaintenanceModeResponse>> asyncRequests = new HashMap<>();
 
-    public HostMaintenanceModeResponseHandler(ErrorTransformer<HasMessageProperties<?>> errorTransformer) {
+    public vCenterHostMaintenanceModeResponseHandler(ErrorTransformer<HasMessageProperties<?>> errorTransformer) {
         super(HostMaintenanceModeResponseMessage.class, new DefaultMessageValidator<>(), EXCHANGE_FRU_RESPONSE, errorTransformer);
     }
 

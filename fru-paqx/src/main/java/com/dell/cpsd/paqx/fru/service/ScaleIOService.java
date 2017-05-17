@@ -8,6 +8,9 @@ package com.dell.cpsd.paqx.fru.service;
 
 import com.dell.cpsd.paqx.fru.dto.ConsulRegistryResult;
 import com.dell.cpsd.paqx.fru.rest.dto.EndpointCredentials;
+import com.dell.cpsd.paqx.fru.valueobject.LongRunning;
+import com.dell.cpsd.storage.capabilities.api.OrderAckMessage;
+import com.dell.cpsd.storage.capabilities.api.OrderInfo;
 import com.dell.cpsd.storage.capabilities.api.ScaleIOSystemDataRestRep;
 
 import java.util.concurrent.CompletableFuture;
@@ -18,6 +21,6 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface ScaleIOService {
     CompletableFuture<ScaleIOSystemDataRestRep> listStorage(final EndpointCredentials scaleIOCredentials);
-
-    CompletableFuture<ConsulRegistryResult> requestConsulRegistration(EndpointCredentials scaleIOCredentials);
+    LongRunning<OrderAckMessage, OrderInfo> sioNodeRemove(final EndpointCredentials scaleIOCredentials, final EndpointCredentials scaleIOMDMCredentials);
+    CompletableFuture<ConsulRegistryResult> requestConsulRegistration(final EndpointCredentials scaleIOCredentials);
 }

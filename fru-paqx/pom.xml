@@ -57,12 +57,6 @@
             <version>0.3-SNAPSHOT</version>
         </dependency>
 
-        <!--<dependency>-->
-            <!--<groupId>com.dell.cpsd</groupId>-->
-            <!--<artifactId>coprhd-adapter-temp-api</artifactId>-->
-            <!--<version>1.0</version>-->
-        <!--</dependency>-->
-
         <dependency>
             <artifactId>storage-capabilities-api</artifactId>
             <groupId>com.dell.cpsd.storage.capabilities.api</groupId>
@@ -146,7 +140,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-tomcat</artifactId>
-            <!--<scope>provided</scope>-->
         </dependency>
 
         <!-- swagger-jersey2 version must use the same swagger-core as springfox-swagger -->
@@ -397,16 +390,20 @@
                             </sourceDirectory>
                             <targetPackage>com.dell.converged.capabilities.compute.discovered.nodes.api</targetPackage>
                             <outputDirectory>${project.build.directory}/generated-sources/discovered-nodes-capabilities</outputDirectory>
+                            <removeOldOutput>false</removeOldOutput>
                             <useLongIntegers>true</useLongIntegers>
-                            <removeOldOutput>true</removeOldOutput>
                             <generateBuilders>true</generateBuilders>
                             <includeConstructors>true</includeConstructors>
-                            <includeAdditionalProperties>true</includeAdditionalProperties>
+                            <includeAdditionalProperties>false</includeAdditionalProperties>
                             <serializable>false</serializable>
+                            <useCommonsLang3>true</useCommonsLang3>
+                            <includeJsr303Annotations>true</includeJsr303Annotations>
                             <sourceSortOrder>FILES_FIRST</sourceSortOrder>
-                            <customAnnotator>com.dell.cpsd.common.contract.enricher.plugins.jsonschema2pojo.MessageAnnotator
+                            <customAnnotator>
+                                com.dell.cpsd.common.contract.enricher.plugins.jsonschema2pojo.MessageAnnotator
                             </customAnnotator>
-                            <customRuleFactory>com.dell.cpsd.common.contract.enricher.plugins.jsonschema2pojo.DefaultRuleFactory
+                            <customRuleFactory>
+                                com.dell.cpsd.common.contract.enricher.plugins.jsonschema2pojo.DefaultRuleFactory
                             </customRuleFactory>
                         </configuration>
                     </execution>
