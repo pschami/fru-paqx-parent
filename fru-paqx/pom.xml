@@ -37,7 +37,33 @@
         <url>https://github.com/dellemc-symphony/fru-paqx-parent/tree/master</url>
     </scm>
 
+    <properties>
+        <dbh2.version>1.4.195</dbh2.version>
+    </properties>
+
     <dependencies>
+        <!-- https://mvnrepository.com/artifact/org.springframework/spring-orm -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-orm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.hibernate</groupId>
+            <artifactId>hibernate-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.hibernate.javax.persistence</groupId>
+            <artifactId>hibernate-jpa-2.1-api</artifactId>
+        </dependency>
+
+
+        <!-- H2 DB -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>${dbh2.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>com.dell.cpsd.common.messaging</groupId>
             <artifactId>common-rabbitmq</artifactId>
@@ -56,6 +82,12 @@
             <type>jar</type>
             <version>0.3-SNAPSHOT</version>
         </dependency>
+
+        <!--<dependency>-->
+            <!--<groupId>com.dell.cpsd</groupId>-->
+            <!--<artifactId>coprhd-adapter-temp-api</artifactId>-->
+            <!--<version>1.0</version>-->
+        <!--</dependency>-->
 
         <dependency>
             <artifactId>storage-capabilities-api</artifactId>
@@ -140,6 +172,7 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-tomcat</artifactId>
+            <!--<scope>provided</scope>-->
         </dependency>
 
         <!-- swagger-jersey2 version must use the same swagger-core as springfox-swagger -->

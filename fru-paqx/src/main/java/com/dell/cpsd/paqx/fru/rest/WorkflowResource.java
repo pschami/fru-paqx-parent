@@ -14,6 +14,8 @@ import com.dell.cpsd.paqx.fru.rest.dto.vCenterSystemProperties;
 import com.dell.cpsd.paqx.fru.rest.dto.vcenter.ClusterOperationResponse;
 import com.dell.cpsd.paqx.fru.rest.dto.vcenter.DestroyVmResponse;
 import com.dell.cpsd.paqx.fru.rest.dto.vcenter.HostMaintenanceModeResponse;
+import com.dell.cpsd.paqx.fru.rest.representation.HostRepresentation;
+import com.dell.cpsd.paqx.fru.rest.representation.HostSelectionJobRepresentation;
 import com.dell.cpsd.paqx.fru.rest.representation.JobRepresentation;
 import com.dell.cpsd.paqx.fru.service.DataService;
 import com.dell.cpsd.paqx.fru.service.ScaleIOService;
@@ -21,10 +23,12 @@ import com.dell.cpsd.paqx.fru.service.WorkflowService;
 import com.dell.cpsd.paqx.fru.service.vCenterService;
 import com.dell.cpsd.paqx.fru.valueobject.LongRunning;
 import com.dell.cpsd.paqx.fru.valueobject.NextStep;
+import com.dell.cpsd.storage.capabilities.api.SIONodeRemoveRequestMessage;
 import com.dell.cpsd.storage.capabilities.api.OrderAckMessage;
 import com.dell.cpsd.storage.capabilities.api.OrderInfo;
 import com.dell.cpsd.storage.capabilities.api.ScaleIOSystemDataRestRep;
 import com.dell.cpsd.virtualization.capabilities.api.ClusterOperationResponseMessage;
+import com.dell.cpsd.virtualization.capabilities.api.DestroyVMRequestMessage;
 import com.dell.cpsd.virtualization.capabilities.api.DestroyVMResponseMessage;
 import com.dell.cpsd.virtualization.capabilities.api.HostMaintenanceModeResponseMessage;
 import com.dell.cpsd.virtualization.capabilities.api.HostPowerOperationResponseMessage;
@@ -54,9 +58,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Workflow resource.
@@ -417,7 +423,10 @@ public class WorkflowResource {
         //
         final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
-        final JobRepresentation jobRepresentation = new JobRepresentation(job);
+        final HostSelectionJobRepresentation jobRepresentation = new HostSelectionJobRepresentation(job);
+
+        List<HostRepresentation> hosts = dataService.getVCenterHosts(jobId); //4 things
+        jobRepresentation.setHostRepresentations(hosts);
 
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
@@ -438,6 +447,7 @@ public class WorkflowResource {
                                    EndpointCredentials scaleIOMDMCredentials) {
         final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
+
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
         try {
@@ -461,14 +471,30 @@ public class WorkflowResource {
     @POST
     @Path("{jobId}/start-scaleio-remove-workflow")
     public void scaleioRemoveWorkflow(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
-                                      @Context UriInfo uriInfo) {
+                                      @Context UriInfo uriInfo, HostRepresentation host) {
         asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
                 .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
         asyncResponse.setTimeout(10, TimeUnit.SECONDS);
 
         final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
+        job.setSelectedHostRepresentation(host);
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
+
+        //        TODO:Example of call to data service to get a scaleioremove message based on scaleio credentials and a esxi host name.
+//        SIONodeRemoveRequestMessage removeMessage = dataService
+//                .getSDSHostsToRemoveFromHostRepresentation(jobId, host, job.getScaleIOCredentials().getEndpointUrl(),
+//                        job.getScaleIOCredentials().getPassword(), job.getScaleIOCredentials().getUsername());
+//
+//        List<DestroyVMRequestMessage> destroyVMRequestMessages = dataService
+//                .getDestroyVMRequestMessage(jobId, host, job.getVcenterCredentials().getEndpointUrl(),
+//                        job.getVcenterCredentials().getPassword(), job.getVcenterCredentials().getUsername());
+//        if (destroyVMRequestMessages != null)
+//        {
+//            job.setSelectedVMsToDestroy(
+//                    destroyVMRequestMessages.stream().filter(Objects::nonNull).map(x -> x.getUuid()).filter(Objects::nonNull)
+//                            .collect(Collectors.toList()));
+//        }
 
         final LongRunning<OrderAckMessage, OrderInfo> longRunning = scaleIOService
                 .sioNodeRemove(job.getScaleIOCredentials(), job.getScaleIOMDMCredentials());

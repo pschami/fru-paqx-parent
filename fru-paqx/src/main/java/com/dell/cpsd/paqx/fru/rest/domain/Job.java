@@ -7,6 +7,7 @@ package com.dell.cpsd.paqx.fru.rest.domain;
 
 import com.dell.cpsd.paqx.fru.rest.dto.EndpointCredentials;
 import com.dell.cpsd.paqx.fru.valueobject.LongRunning;
+import com.dell.cpsd.paqx.fru.rest.representation.HostRepresentation;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,8 +44,11 @@ public class Job
     {
     };
 
-    public Job(final UUID id, final String workflow, final String currentStep)
-    {
+    private HostRepresentation selectedHostRepresentation;
+
+    private List<String> selectedVMsToDestroy;
+
+    public Job(final UUID id, final String workflow, final String currentStep) {
         this.id = id;
         this.workflow = workflow;
         this.currentStep = currentStep;
@@ -124,6 +128,26 @@ public class Job
     public void addVcenterCredentials(final EndpointCredentials vcenterCredentials)
     {
         this.vcenterCredentials = vcenterCredentials;
+    }
+
+    public void setSelectedHostRepresentation(final HostRepresentation selectedHostRepresentation)
+    {
+        this.selectedHostRepresentation = selectedHostRepresentation;
+    }
+
+    public void setSelectedVMsToDestroy(final List<String> selectedVMsToDestroy)
+    {
+        this.selectedVMsToDestroy = selectedVMsToDestroy;
+    }
+
+    public HostRepresentation getSelectedHostRepresentation()
+    {
+        return selectedHostRepresentation;
+    }
+
+    public List<String> getSelectedVMsToDestroy()
+    {
+        return selectedVMsToDestroy;
     }
 
     public void addLongRunningTask(final String longRunningStep, final LongRunning longRunning)
