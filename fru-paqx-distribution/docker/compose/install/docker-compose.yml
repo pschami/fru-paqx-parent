@@ -10,3 +10,4 @@ services:
     container_name: symphony-fru-paqx
     network_mode: "host"
 
+
