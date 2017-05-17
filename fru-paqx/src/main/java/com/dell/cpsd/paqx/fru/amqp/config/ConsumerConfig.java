@@ -75,7 +75,9 @@ public class ConsumerConfig {
     @Bean
     DefaultMessageListener fruMessageListener() {
         return new DefaultMessageListener(messageConverter, listNodesResponseHandler(), listStorageResponseHandler(),
-                vCenterDiscoverResponseHandler(), vCenterConsulRegisterResponseHandler(), scaleIOConsulRegisterResponseHandler());
+                vCenterDiscoverResponseHandler(), vCenterConsulRegisterResponseHandler(), scaleIOOrderAckResponseHandler(),
+                scaleIORemoveResponseHandler(), vCenterDestroyVmResponseHandler(), vCenterHostPowerOperationResponseHandler(),
+                vCenterHostMaintenanceModeResponseHandler(), vCenterClusterOperationsResponseHandler(), coprHDConsulRegisterResponseHandler());
     }
 
     @Bean
@@ -114,13 +116,28 @@ public class ConsumerConfig {
     }
 
     @Bean
-    HostMaintenanceModeResponseHandler hostMaintenanceModeResponseHandler() {
-        return new HostMaintenanceModeResponseHandler(messageErrorTransformer());
+    vCenterHostMaintenanceModeResponseHandler vCenterHostMaintenanceModeResponseHandler() {
+        return new vCenterHostMaintenanceModeResponseHandler(messageErrorTransformer());
     }
 
     @Bean
     VCenterClusterOperationsResponseHandler vCenterClusterOperationsResponseHandler() {
         return new VCenterClusterOperationsResponseHandler(messageErrorTransformer());
+    }
+
+    @Bean
+    CoprHDConsulRegisterResponseHandler coprHDConsulRegisterResponseHandler() {
+        return new CoprHDConsulRegisterResponseHandler(messageErrorTransformer());
+    }
+
+    @Bean
+    ScaleIOOrderAckResponseHandler scaleIOOrderAckResponseHandler() {
+        return new ScaleIOOrderAckResponseHandler(messageErrorTransformer());
+    }
+
+    @Bean
+    ScaleIORemoveResponseHandler scaleIORemoveResponseHandler() {
+        return new ScaleIORemoveResponseHandler(messageErrorTransformer());
     }
 
     ErrorTransformer<HasMessageProperties<?>> messageErrorTransformer() {
@@ -142,10 +159,5 @@ public class ConsumerConfig {
     @Bean
     DiscoveryInfoToVCenterSystemPropertiesTransformer discoveryInfoToVCenterSystemPropertiesTransformer() {
         return new DiscoveryInfoToVCenterSystemPropertiesTransformer();
-    }
-
-    @Bean
-    ScaleIOConsulRegisterResponseHandler scaleIOConsulRegisterResponseHandler() {
-        return new ScaleIOConsulRegisterResponseHandler(messageErrorTransformer());
     }
 }

@@ -19,7 +19,10 @@ import com.dell.cpsd.paqx.fru.service.DataService;
 import com.dell.cpsd.paqx.fru.service.ScaleIOService;
 import com.dell.cpsd.paqx.fru.service.WorkflowService;
 import com.dell.cpsd.paqx.fru.service.vCenterService;
+import com.dell.cpsd.paqx.fru.valueobject.LongRunning;
 import com.dell.cpsd.paqx.fru.valueobject.NextStep;
+import com.dell.cpsd.storage.capabilities.api.OrderAckMessage;
+import com.dell.cpsd.storage.capabilities.api.OrderInfo;
 import com.dell.cpsd.storage.capabilities.api.ScaleIOSystemDataRestRep;
 import com.dell.cpsd.virtualization.capabilities.api.ClusterOperationResponseMessage;
 import com.dell.cpsd.virtualization.capabilities.api.DestroyVMResponseMessage;
@@ -31,13 +34,27 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import javax.ws.rs.*;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
-import javax.ws.rs.core.*;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.Link;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.PathSegment;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriInfo;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -175,29 +192,49 @@ public class WorkflowResource {
     @POST
     @Consumes("application/vnd.dellemc.coprhd.endpoint+json")
     @Path("{jobId}/{step}")
-    public Response captureCoprHD(@PathParam("jobId") String jobId, @PathParam("step") String step, @Context UriInfo uriInfo,
-                                  EndpointCredentials coprhdCredentials) {
+    public void captureCoprHD(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
+            @PathParam("step") String step, @Context UriInfo uriInfo, EndpointCredentials coprhdCredentials) {
+        asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
+                .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
+        asyncResponse.setTimeout(10, TimeUnit.SECONDS);
+
         final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
-        final URL url;
         try {
-            url = new URL(coprhdCredentials.getEndpointUrl());
+            new URL(coprhdCredentials.getEndpointUrl());
         } catch (MalformedURLException e) {
+            LOG.warn("Invalid URL found {}", coprhdCredentials.getEndpointUrl());
             jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
-            return Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build();
+            jobRepresentation.setLastResponse(e.getLocalizedMessage());
+            Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build();
+            return;
         }
 
-        job.addCoprhdCredentials(coprhdCredentials);
+        final CompletableFuture<ConsulRegistryResult> consulRegistryResultCompletableFuture = scaleIOService
+                .requestConsulRegistration(coprhdCredentials);
+        consulRegistryResultCompletableFuture.thenAccept(consulRegistryResult ->
+        {
+            if (consulRegistryResult.isSuccess()) {
+                LOG.info("Consul registration successfully completed");
 
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-        }
+                job.addCoprhdCredentials(coprhdCredentials);
 
-        return Response.ok(jobRepresentation).build();
+                final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
+                if (nextStep != null) {
+                    workflowService.advanceToNextStep(job, thisStep);
+                    jobRepresentation
+                            .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+                }
+                asyncResponse.resume(Response.ok(jobRepresentation).build());
+            } else {
+                LOG.info("Consul registration failed {}", consulRegistryResult.getDescription());
+                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
+                jobRepresentation.setLastResponse(consulRegistryResult.getDescription());
+                asyncResponse.resume(Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build());
+            }
+        });
     }
 
     @POST
@@ -251,49 +288,29 @@ public class WorkflowResource {
     @POST
     @Consumes("application/vnd.dellemc.scaleio.endpoint+json")
     @Path("{jobId}/{step}")
-    public void captureScaleIO(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
-            @PathParam("step") String step, @Context UriInfo uriInfo, EndpointCredentials scaleIOCredentials) {
-        asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
-                .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
-        asyncResponse.setTimeout(10, TimeUnit.SECONDS);
-
+    public Response captureScaleIO(@PathParam("jobId") String jobId, @PathParam("step") String step, @Context UriInfo uriInfo,
+            EndpointCredentials scaleIOCredentials) {
         final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
+        final URL url;
         try {
-            new URL(scaleIOCredentials.getEndpointUrl());
+            url = new URL(scaleIOCredentials.getEndpointUrl());
         } catch (MalformedURLException e) {
-            LOG.warn("Invalid URL found {}", scaleIOCredentials.getEndpointUrl());
             jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
-            jobRepresentation.setLastResponse(e.getLocalizedMessage());
-            Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build();
-            return;
+            return Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build();
         }
 
-        final CompletableFuture<ConsulRegistryResult> consulRegistryResultCompletableFuture = scaleIOService
-                .requestConsulRegistration(scaleIOCredentials);
-        consulRegistryResultCompletableFuture.thenAccept(consulRegistryResult ->
-        {
-            if (consulRegistryResult.isSuccess()) {
-                LOG.info("Consul registration successfully completed");
+        job.addScaleIOCredentials(scaleIOCredentials);
 
-                job.addScaleIOCredentials(scaleIOCredentials);
+        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
+        if (nextStep != null) {
+            workflowService.advanceToNextStep(job, thisStep);
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+        }
 
-                final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-                if (nextStep != null) {
-                    workflowService.advanceToNextStep(job, thisStep);
-                    jobRepresentation
-                            .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-                }
-                asyncResponse.resume(Response.ok(jobRepresentation).build());
-            } else {
-                LOG.info("Consul registration failed {}", consulRegistryResult.getDescription());
-                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
-                jobRepresentation.setLastResponse(consulRegistryResult.getDescription());
-                asyncResponse.resume(Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build());
-            }
-        });
+        return Response.ok(jobRepresentation).build();
     }
 
     @POST
@@ -331,9 +348,6 @@ public class WorkflowResource {
         final Job job = workflowService.findJob(UUID.fromString(jobId));
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
-        jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
-        //
-
         final CompletableFuture<ScaleIOSystemDataRestRep> systemRestCompletableFuture = scaleIOService
                 .listStorage(job.getScaleIOCredentials());
         systemRestCompletableFuture.thenAccept(scaleIOSystemDataRestRep ->
@@ -345,6 +359,10 @@ public class WorkflowResource {
                 workflowService.advanceToNextStep(job, thisStep);
                 jobRepresentation
                         .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            }
+            else {
+                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
+
             }
 
             LOG.info("Completing response");
@@ -364,8 +382,6 @@ public class WorkflowResource {
         final Job job = workflowService.findJob(UUID.fromString(jobId));
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
-        jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
-
         final CompletableFuture<vCenterSystemProperties> vcenterSystemCompletableFuture = vcenterService
                 .showSystem(job.getVcenterCredentials());
         vcenterSystemCompletableFuture.thenAccept(vCenterSystemProperties ->
@@ -378,6 +394,10 @@ public class WorkflowResource {
                 workflowService.advanceToNextStep(job, thisStep);
                 jobRepresentation
                         .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            }
+            else {
+                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
+
             }
 
             LOG.info("Completing response");
@@ -410,6 +430,34 @@ public class WorkflowResource {
         LOG.debug("Completed response");
     }
 
+
+    @POST
+    @Consumes("application/vnd.dellemc.scaleiomdm.endpoint+json")
+    @Path("{jobId}/{step}")
+    public Response captureScaleIOMDMCredentials(@PathParam("jobId") String jobId, @PathParam("step") String step, @Context UriInfo uriInfo,
+                                   EndpointCredentials scaleIOMDMCredentials) {
+        final String thisStep = findStepFromPath(uriInfo);
+        final Job job = workflowService.findJob(UUID.fromString(jobId));
+        final JobRepresentation jobRepresentation = new JobRepresentation(job);
+
+        try {
+            new URL(scaleIOMDMCredentials.getEndpointUrl());
+        } catch (MalformedURLException e) {
+            jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
+            return Response.status(Response.Status.BAD_REQUEST).entity(jobRepresentation).build();
+        }
+
+        job.addScaleIOMDMCredentials(scaleIOMDMCredentials);
+
+        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
+        if (nextStep != null) {
+            workflowService.advanceToNextStep(job, thisStep);
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+        }
+
+        return Response.ok(jobRepresentation).build();
+    }
+
     @POST
     @Path("{jobId}/start-scaleio-remove-workflow")
     public void scaleioRemoveWorkflow(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
@@ -418,44 +466,50 @@ public class WorkflowResource {
                 .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
         asyncResponse.setTimeout(10, TimeUnit.SECONDS);
 
-        //
         final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-        }
+        final LongRunning<OrderAckMessage, OrderInfo> longRunning = scaleIOService
+                .sioNodeRemove(job.getScaleIOCredentials(), job.getScaleIOMDMCredentials());
 
-        LOG.info("Completing response");
-        asyncResponse.resume(Response.ok(jobRepresentation).build());
-        LOG.debug("Completed response");
+        job.addLongRunningTask(thisStep, longRunning);
+
+        longRunning.onAcknowledged(orderAckMessage -> {
+            LOG.debug("Long running task acknowledged: {}", orderAckMessage);
+            jobRepresentation.addLink(createLongRunningNextStepLink(uriInfo, job, thisStep), findMethodFromStep("longRunning"));
+            asyncResponse.resume(Response.ok(jobRepresentation).build());
+        }).onCompleted(orderInfo -> workflowService.advanceToNextStep(job, thisStep));
     }
 
-    @POST
-    @Path("{jobId}/wait-for-scaleio-workflow")
-    public void waitForScaleIOWorkflow(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
-                                       @Context UriInfo uriInfo) {
+
+    @POST // @GET??????
+    @Path("{jobId}/long-running/{currentLongRunningStep}")
+    public void pollLongRunningTask(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
+            @PathParam("currentLongRunningStep") String currentLongRunningStep, @Context UriInfo uriInfo)
+    {
         asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
                 .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
         asyncResponse.setTimeout(10, TimeUnit.SECONDS);
 
-        //
-        final String thisStep = findStepFromPath(uriInfo);
         final Job job = workflowService.findJob(UUID.fromString(jobId));
         final JobRepresentation jobRepresentation = new JobRepresentation(job);
 
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+        if (job.areAnyLongRunningActionsInProgress())        {
+            jobRepresentation.addLink(createLongRunningNextStepLink(uriInfo, job, currentLongRunningStep), findMethodFromStep("longRunning"), 10);
+            jobRepresentation.addLink(createRetryStepLink(uriInfo, job, currentLongRunningStep));  // TODO: should we?
         }
-
-        LOG.info("Completing response");
+        else {
+            final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), currentLongRunningStep);
+            if (nextStep != null) {
+                workflowService.advanceToNextStep(job, currentLongRunningStep);
+                jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            }
+            else {
+                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, currentLongRunningStep));
+            }
+        }
         asyncResponse.resume(Response.ok(jobRepresentation).build());
-        LOG.debug("Completed response");
     }
 
     @POST
@@ -602,7 +656,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -636,7 +690,7 @@ public class WorkflowResource {
                 if (nextStep != null) {
                     workflowService.advanceToNextStep(job, thisStep);
                     jobRepresentation
-                            .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+                            .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
                 }
 
                 asyncResponse.resume(Response.ok(jobRepresentation).build());
@@ -650,30 +704,6 @@ public class WorkflowResource {
             asyncResponse.resume(Response.ok(jobRepresentation).build());
             LOG.debug("Completed response");
         });
-    }
-
-    @POST
-    @Path("{jobId}/wait-for-rackhd-discovery")
-    public void waitForRackHDDiscovery(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
-                                       @Context UriInfo uriInfo) {
-        asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
-                .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
-        asyncResponse.setTimeout(10, TimeUnit.SECONDS);
-
-        //
-        final String thisStep = findStepFromPath(uriInfo);
-        final Job job = workflowService.findJob(UUID.fromString(jobId));
-        final JobRepresentation jobRepresentation = new JobRepresentation(job);
-
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-        }
-
-        LOG.info("Completing response");
-        asyncResponse.resume(Response.ok(jobRepresentation).build());
-        LOG.debug("Completed response");
     }
 
     @POST
@@ -692,31 +722,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-        }
-
-        LOG.info("Completing response");
-        asyncResponse.resume(Response.ok(jobRepresentation).build());
-        LOG.debug("Completed response");
-    }
-
-    @POST
-    @Path("{jobId}/wait-for-rackhd-host-discovery")
-    public void waitForRackHDHostDiscovery(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
-                                           @Context UriInfo uriInfo) {
-        asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
-                .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
-        asyncResponse.setTimeout(10, TimeUnit.SECONDS);
-
-        //
-        final String thisStep = findStepFromPath(uriInfo);
-        final Job job = workflowService.findJob(UUID.fromString(jobId));
-        final JobRepresentation jobRepresentation = new JobRepresentation(job);
-
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -740,7 +746,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -764,7 +770,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -787,7 +793,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -824,12 +830,12 @@ public class WorkflowResource {
                 if (nextStep != null) {
                     workflowService.advanceToNextStep(job, thisStep);
                     jobRepresentation
-                            .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+                            .addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
                 }
 
                 asyncResponse.resume(Response.ok(jobRepresentation).build());
             } else {
-                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep));
+                jobRepresentation.addLink(createRetryStepLink(uriInfo, job, thisStep), 0);
                 jobRepresentation.setLastResponse(clusterOperationResponse.getStatus());
                 asyncResponse.resume(Response.status(Response.Status.BAD_REQUEST).build());
             }
@@ -855,7 +861,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -879,7 +885,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -902,30 +908,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-        }
-
-        LOG.info("Completing response");
-        asyncResponse.resume(Response.ok(jobRepresentation).build());
-        LOG.debug("Completed response");
-    }
-
-    @POST
-    @Path("{jobId}/wait-for-svm-deploy")
-    public void waitForSVMDeploy(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId, @Context UriInfo uriInfo) {
-        asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
-                .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
-        asyncResponse.setTimeout(10, TimeUnit.SECONDS);
-
-        //
-        final String thisStep = findStepFromPath(uriInfo);
-        final Job job = workflowService.findJob(UUID.fromString(jobId));
-        final JobRepresentation jobRepresentation = new JobRepresentation(job);
-
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -949,31 +932,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
-        }
-
-        LOG.info("Completing response");
-        asyncResponse.resume(Response.ok(jobRepresentation).build());
-        LOG.debug("Completed response");
-    }
-
-    @POST
-    @Path("{jobId}/wait-for-scaleio-add-complete")
-    public void waitForScaleIOAddComplete(@Suspended final AsyncResponse asyncResponse, @PathParam("jobId") String jobId,
-                                          @Context UriInfo uriInfo) {
-        asyncResponse.setTimeoutHandler(asyncResponse1 -> asyncResponse1
-                .resume(Response.status(Response.Status.SERVICE_UNAVAILABLE).entity("{\"status\":\"timeout\"}").build()));
-        asyncResponse.setTimeout(10, TimeUnit.SECONDS);
-
-        //
-        final String thisStep = findStepFromPath(uriInfo);
-        final Job job = workflowService.findJob(UUID.fromString(jobId));
-        final JobRepresentation jobRepresentation = new JobRepresentation(job);
-
-        final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
-        if (nextStep != null) {
-            workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -997,7 +956,7 @@ public class WorkflowResource {
         final NextStep nextStep = workflowService.findNextStep(job.getWorkflow(), thisStep);
         if (nextStep != null) {
             workflowService.advanceToNextStep(job, thisStep);
-            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()));
+            jobRepresentation.addLink(createNextStepLink(uriInfo, job, nextStep.getNextStep()), findMethodFromStep(nextStep.getNextStep()), 0);
         }
 
         LOG.info("Completing response");
@@ -1010,6 +969,17 @@ public class WorkflowResource {
         final String type = findTypeFromStep(nextStep);
 
         return Link.fromUriBuilder(uriInfo.getBaseUriBuilder().path("workflow").path(job.getId().toString()).path(path)).type(type)
+                .rel("step-next").build();
+    }
+
+    private Link createLongRunningNextStepLink(final UriInfo uriInfo, final Job job, final String currentLongRunningStep) {
+        final String longRunningStep = "longRunning";
+        final String longRunningPath = findPathFromStep(longRunningStep);
+        final String type = findTypeFromStep(longRunningStep);
+        final String currentPath = findPathFromStep(currentLongRunningStep);
+
+        return Link.fromUriBuilder(uriInfo.getBaseUriBuilder().path("workflow").path(job.getId().toString()).path(longRunningPath)
+                .path(currentPath)).type(type)
                 .rel("step-next").build();
     }
 
@@ -1027,24 +997,23 @@ public class WorkflowResource {
 
     private String findPathFromStep(String step) {
         final Map<String, String> stepToPath = new HashMap<>();
-        stepToPath.put("captureRackHDEndpoint", "rackhd-endpoint");
-        stepToPath.put("captureCoprHDEndpoint", "coprhd-endpoint");
-        stepToPath.put("capturevCenterEndpoint", "vcenter-endpoint");
-        stepToPath.put("captureScaleIOEndpoint", "scaleio-endpoint");
+        stepToPath.put("captureRackHDEndpoint", "capture-rackhd-endpoint");
+        stepToPath.put("captureCoprHDEndpoint", "capture-coprhd-endpoint");
+        stepToPath.put("capturevCenterEndpoint", "capture-vcenter-endpoint");
+        stepToPath.put("captureScaleIOEndpoint", "capture-scaleio-endpoint");
         stepToPath.put("startScaleIODataCollection", "start-scaleio-data-collection");
         stepToPath.put("startvCenterDataCollection", "start-vcenter-data-collection");
         stepToPath.put("presentSystemListForRemoval", "present-system-list-remove");
+        stepToPath.put("captureScaleIOMDMCredentials", "capture-scaleio-mdm-credentials");
         stepToPath.put("startSIORemoveWorkflow", "start-scaleio-remove-workflow");
-        stepToPath.put("waitForSIORemoveComplete", "wait-for-scaleio-workflow");
         stepToPath.put("destroyScaleIOVM", "destroy-scaleio-vm");
-        //TODO: Change enterMaintanenceMode to enterMaintenanceMode
-        stepToPath.put("enterMaintanenceMode", "enter-maintanence-mode");
+        stepToPath.put("enterMaintenanceMode", "enter-maintenance-mode");
         stepToPath.put("removeHostFromVCenter", "remove-host-from-vcenter");
         stepToPath.put("rebootHostForDiscovery", "reboot-host-for-discovery");
-        stepToPath.put("waitRackHDHostDiscovery", "wait-for-rackhd-discovery");
+        //stepToPath.put("waitRackHDHostDiscovery", "wait-for-rackhd-discovery");
         stepToPath.put("powerOffEsxiHostForRemoval", "power-off-esxi-host-for-removal");
         stepToPath.put("instructPhysicalRemoval", "instruct-physical-removal");
-        stepToPath.put("waitRackHDHostDiscovery", "wait-for-rackhd-host-discovery");
+        //stepToPath.put("waitRackHDHostDiscovery", "wait-for-rackhd-host-discovery");
         stepToPath.put("presentSystemListForAddition", "present-system-list-add");
         stepToPath.put("configureDisksRackHD", "configure-disks-rackhd");
         stepToPath.put("installEsxi", "install-esxi");
@@ -1052,35 +1021,35 @@ public class WorkflowResource {
         stepToPath.put("installSIOVib", "install-scaleio-vib");
         stepToPath.put("exitVCenterMaintenanceMode", "exit-vcenter-maintenance-mode");
         stepToPath.put("deploySVM", "deploy-svm");
-        stepToPath.put("waitForSVMDeploy", "wait-for-svm-deploy");
+        //stepToPath.put("waitForSVMDeploy", "wait-for-svm-deploy");
         stepToPath.put("startSIOAddWorkflow", "start-scaleio-add-workflow");
-        stepToPath.put("waitForSIOAddComplete", "wait-for-scaleio-add-complete");
+        //stepToPath.put("waitForSIOAddComplete", "wait-for-scaleio-add-complete");
         stepToPath.put("mapSIOVolumesToHost", "map-scaleio-volumes-to-host");
         stepToPath.put("completed", "");
+        stepToPath.put("longRunning", "long-running");
 
         return stepToPath.get(step);
     }
 
     private String findStepFromPath(final UriInfo uriInfo) {
         final Map<String, String> stepToPath = new HashMap<>();
-        stepToPath.put("rackhd-endpoint", "captureRackHDEndpoint");
-        stepToPath.put("coprhd-endpoint", "captureCoprHDEndpoint");
-        stepToPath.put("vcenter-endpoint", "capturevCenterEndpoint");
-        stepToPath.put("scaleio-endpoint", "captureScaleIOEndpoint");
+        stepToPath.put("capture-rackhd-endpoint", "captureRackHDEndpoint");
+        stepToPath.put("capture-coprhd-endpoint", "captureCoprHDEndpoint");
+        stepToPath.put("capture-vcenter-endpoint", "capturevCenterEndpoint");
+        stepToPath.put("capture-scaleio-endpoint", "captureScaleIOEndpoint");
         stepToPath.put("start-scaleio-data-collection", "startScaleIODataCollection");
         stepToPath.put("start-vcenter-data-collection", "startvCenterDataCollection");
         stepToPath.put("present-system-list-remove", "presentSystemListForRemoval");
+        stepToPath.put("capture-scaleio-mdm-credentials", "captureScaleIOMDMCredentials");
         stepToPath.put("start-scaleio-remove-workflow", "startSIORemoveWorkflow");
-        stepToPath.put("wait-for-scaleio-workflow", "waitForSIORemoveComplete");
         stepToPath.put("destroy-scaleio-vm", "destroyScaleIOVM");
-        //TODO: Change enterMaintanenceMode to enterMaintenanceMode
-        stepToPath.put("enter-maintanence-mode", "enterMaintanenceMode");
+        stepToPath.put("enter-maintenance-mode", "enterMaintenanceMode");
         stepToPath.put("remove-host-from-vcenter", "removeHostFromVCenter");
         stepToPath.put("reboot-host-for-discovery", "rebootHostForDiscovery");
-        stepToPath.put("wait-for-rackhd-discovery", "waitRackHDHostDiscovery");
+        //stepToPath.put("wait-for-rackhd-discovery", "waitRackHDHostDiscovery");
         stepToPath.put("power-off-esxi-host-for-removal", "powerOffEsxiHostForRemoval");
         stepToPath.put("instruct-physical-removal", "instructPhysicalRemoval");
-        stepToPath.put("wait-for-rackhd-host-discovery", "waitRackHDHostDiscovery");
+        //stepToPath.put("wait-for-rackhd-host-discovery", "waitRackHDHostDiscovery");
         stepToPath.put("present-system-list-add", "presentSystemListForAddition");
         stepToPath.put("configure-disks-rackhd", "configureDisksRackHD");
         stepToPath.put("install-esxi", "installEsxi");
@@ -1088,10 +1057,11 @@ public class WorkflowResource {
         stepToPath.put("install-scaleio-vib", "installSIOVib");
         stepToPath.put("exit-vcenter-maintenance-mode", "exitVCenterMaintenanceMode");
         stepToPath.put("deploy-svm", "deploySVM");
-        stepToPath.put("wait-for-svm-deploy", "waitForSVMDeploy");
+        //stepToPath.put("wait-for-svm-deploy", "waitForSVMDeploy");
         stepToPath.put("start-scaleio-add-workflow", "startSIOAddWorkflow");
-        stepToPath.put("wait-for-scaleio-add-complete", "waitForSIOAddComplete");
+        //stepToPath.put("wait-for-scaleio-add-complete", "waitForSIOAddComplete");
         stepToPath.put("map-scaleio-volumes-to-host", "mapSIOVolumesToHost");
+        stepToPath.put("long-running", "longRunning");
 
         final List<PathSegment> pathSegments = uriInfo.getPathSegments();
         final PathSegment pathSegment = pathSegments.get(pathSegments.size() - 1);
@@ -1104,12 +1074,15 @@ public class WorkflowResource {
         stepToType.put("captureCoprHDEndpoint", "application/vnd.dellemc.coprhd.endpoint+json");
         stepToType.put("capturevCenterEndpoint", "application/vnd.dellemc.vcenter.endpoint+json");
         stepToType.put("captureScaleIOEndpoint", "application/vnd.dellemc.scaleio.endpoint+json");
+        stepToType.put("captureScaleIOMDMCredentials", "application/vnd.dellemc.scaleio_mdm.endpoint+json");
+
         return stepToType.getOrDefault(step, "application/json");
     }
 
     private String findMethodFromStep(String step) {
         final Map<String, String> stepToMethod = new HashMap<>();
         stepToMethod.put("completed", "GET");
+        stepToMethod.put("longRunning", "GET");
         return stepToMethod.getOrDefault(step, "POST");
     }
 }

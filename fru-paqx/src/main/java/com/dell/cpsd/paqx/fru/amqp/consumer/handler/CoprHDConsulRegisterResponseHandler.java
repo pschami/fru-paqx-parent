@@ -10,8 +10,8 @@ import com.dell.cpsd.common.rabbitmq.consumer.handler.DefaultMessageHandler;
 import com.dell.cpsd.common.rabbitmq.message.HasMessageProperties;
 import com.dell.cpsd.common.rabbitmq.validators.DefaultMessageValidator;
 import com.dell.cpsd.paqx.fru.dto.ConsulRegistryResult;
-import com.dell.cpsd.storage.capabilities.api.ConsulRegisterResponseMessage;
-import com.dell.cpsd.storage.capabilities.api.ResponseInfo;
+import com.dell.cpsd.virtualization.capabilities.api.ConsulRegisterResponseMessage;
+import com.dell.cpsd.virtualization.capabilities.api.ResponseInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,22 +22,19 @@ import java.util.concurrent.CompletableFuture;
 
 import static com.dell.cpsd.paqx.fru.amqp.config.RabbitConfig.EXCHANGE_FRU_RESPONSE;
 
-public class ScaleIOConsulRegisterResponseHandler extends DefaultMessageHandler<ConsulRegisterResponseMessage>
-        implements AsyncAcknowledgement<ConsulRegistryResult>
-{
-    private static final Logger                                               LOG           = LoggerFactory
-            .getLogger(ScaleIOConsulRegisterResponseHandler.class);
-    private              Map<String, CompletableFuture<ConsulRegistryResult>> asyncRequests = new HashMap<>();
+public class CoprHDConsulRegisterResponseHandler extends DefaultMessageHandler<ConsulRegisterResponseMessage>
+        implements AsyncAcknowledgement<ConsulRegistryResult> {
+    private static final Logger LOG = LoggerFactory
+            .getLogger(CoprHDConsulRegisterResponseHandler.class);
+    private Map<String, CompletableFuture<ConsulRegistryResult>> asyncRequests = new HashMap<>();
 
     @Autowired
-    public ScaleIOConsulRegisterResponseHandler(ErrorTransformer<HasMessageProperties<?>> errorTransformer)
-    {
+    public CoprHDConsulRegisterResponseHandler(ErrorTransformer<HasMessageProperties<?>> errorTransformer) {
         super(ConsulRegisterResponseMessage.class, new DefaultMessageValidator<>(), EXCHANGE_FRU_RESPONSE, errorTransformer);
     }
 
     @Override
-    protected void executeOperation(final ConsulRegisterResponseMessage responseMessage) throws Exception
-    {
+    protected void executeOperation(final ConsulRegisterResponseMessage responseMessage) throws Exception {
         LOG.info("Received message {}", responseMessage);
         final String correlationId = responseMessage.getMessageProperties().getCorrelationId();
 
@@ -47,8 +44,7 @@ public class ScaleIOConsulRegisterResponseHandler extends DefaultMessageHandler<
         final CompletableFuture<ConsulRegistryResult> completableFuture = asyncRequests.get(correlationId);
         LOG.info("Completing expectation for  {} {}", correlationId, completableFuture);
 
-        if (completableFuture != null)
-        {
+        if (completableFuture != null) {
             final boolean complete = completableFuture.complete(consulRegistryResult);
             LOG.info("Completed expectation for  {} {} {}", correlationId, completableFuture, complete);
             asyncRequests.remove(correlationId);
@@ -56,8 +52,7 @@ public class ScaleIOConsulRegisterResponseHandler extends DefaultMessageHandler<
     }
 
     @Override
-    public CompletableFuture<ConsulRegistryResult> register(final String correlationId)
-    {
+    public CompletableFuture<ConsulRegistryResult> register(final String correlationId) {
         LOG.info("Setting expectation for  {}", correlationId);
         CompletableFuture<ConsulRegistryResult> completableFuture = new CompletableFuture<>();
         completableFuture.whenComplete((systemRest, throwable) -> asyncRequests.remove(correlationId));
