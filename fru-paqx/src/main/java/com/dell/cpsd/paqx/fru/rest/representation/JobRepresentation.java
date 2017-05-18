@@ -11,6 +11,7 @@ import org.springframework.http.HttpMethod;
 import javax.ws.rs.core.Link;
 import javax.xml.bind.annotation.XmlRootElement;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 

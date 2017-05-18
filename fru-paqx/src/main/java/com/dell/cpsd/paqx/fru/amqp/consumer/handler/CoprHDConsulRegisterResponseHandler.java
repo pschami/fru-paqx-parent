@@ -1,6 +1,6 @@
 /**
- * Copyright © 2017 Dell Inc. or its subsidiaries. All Rights Reserved.
- * VCE Confidential/Proprietary Information
+ * Copyright &copy; 2017 Dell Inc. or its subsidiaries.  All Rights Reserved.
+ * Dell EMC Confidential/Proprietary Information
  */
 
 package com.dell.cpsd.paqx.fru.amqp.consumer.handler;
@@ -10,8 +10,8 @@ import com.dell.cpsd.common.rabbitmq.consumer.handler.DefaultMessageHandler;
 import com.dell.cpsd.common.rabbitmq.message.HasMessageProperties;
 import com.dell.cpsd.common.rabbitmq.validators.DefaultMessageValidator;
 import com.dell.cpsd.paqx.fru.dto.ConsulRegistryResult;
-import com.dell.cpsd.virtualization.capabilities.api.ConsulRegisterResponseMessage;
-import com.dell.cpsd.virtualization.capabilities.api.ResponseInfo;
+import com.dell.cpsd.storage.capabilities.api.ConsulRegisterResponseMessage;
+import com.dell.cpsd.storage.capabilities.api.ResponseInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
