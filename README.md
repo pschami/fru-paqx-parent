@@ -1,5 +1,6 @@
 [![License](https://img.shields.io/badge/License-EPL%201.0-red.svg)](https://opensource.org/licenses/EPL-1.0)
 [![Build Status](https://travis-ci.org/dellemc-symphony/fru-paqx-parent.svg?branch=master)](https://travis-ci.org/dellemc-symphony/fru-paqx-parent)
+[![codecov](https://codecov.io/gh/dellemc-symphony/fru-paqx-parent/branch/master/graph/badge.svg)](https://codecov.io/gh/dellemc-symphony/fru-paqx-parent)
 # fru-paqx-parent
 ## Description
 This repository contains the source code for the FRU PAQX service within Dell Project Symphony. 
