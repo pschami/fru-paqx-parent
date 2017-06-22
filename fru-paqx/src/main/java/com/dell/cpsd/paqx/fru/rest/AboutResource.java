@@ -93,7 +93,7 @@ public class AboutResource {
             asyncResponse.resume(Response.ok(representation).build());
             LOG.debug("Completed response");
         });*/
-        LOG.debug("Exiting about resource");
+        LOG.debug("Exiting about the resource");
     }
 
     private List<String> requiredCapabilities() {
