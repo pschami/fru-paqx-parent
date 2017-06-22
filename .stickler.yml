@@ -1,6 +1,4 @@
 linters:
-    checkstyle:
-        config: ./checkstyle.xml
-    
-     yamllint:
-           
+  checkstyle:
+    config: './checkstyle.xml' 
+  yamllint:
