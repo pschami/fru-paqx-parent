@@ -85,7 +85,7 @@ public class AboutResource {
         }
         asyncResponse.resume(Response.ok(representation).build());
 
-        LOG.debug("Completed response");
+        LOG.debug("Completed the bad response");
 
 /*        nodeDiscovery.discover().thenAccept(nodes ->
         {
