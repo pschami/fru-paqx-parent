@@ -1,5 +1,6 @@
 [![License](https://img.shields.io/badge/License-EPL%201.0-red.svg)](https://opensource.org/licenses/EPL-1.0)
 [![Build Status](https://travis-ci.org/dellemc-symphony/fru-paqx-parent.svg?branch=master)](https://travis-ci.org/dellemc-symphony/fru-paqx-parent)
+[![codecov](https://codecov.io/gh/dellemc-symphony/fru-paqx-parent/branch/master/graph/badge.svg)](https://codecov.io/gh/dellemc-symphony/fru-paqx-parent)
 # fru-paqx-parent
 ## Description
 This repository contains the source code for the FRU PAQX service within Dell Project Symphony. 
@@ -8,7 +9,7 @@ The FRU PAQX service implements a VxRack FLEX Field Replacement Unit (FRU) workf
 
 ## Documentation
 
-The documentation is hosted at http://dellemc-symphony.readthedocs.io/.
+You can find additional documentation for Project Symphony at [dellemc-symphony.readthedocs.io][documentation].
 
 ## API overview
 
@@ -78,7 +79,7 @@ This call returns a JSON response that provides the next step to execute in the 
    "lastResponse": null,
    "links": [{
        "rel": "step-next",
-       "href": "https://10.3.249.133:18443/fru/api/workflow/72a6914e-35ea-471f-ae78-04f889c5cfb5/rackhd-endpoint",
+       "href": "https://localhost:18443/fru/api/workflow/72a6914e-35ea-471f-ae78-04f889c5cfb5/rackhd-endpoint",
        "type": "application/vnd.dellemc.rackhd.endpoint+json",
        "method": "POST"
    }]
@@ -89,9 +90,9 @@ Execute the rackhd-endpoint API call (shown in the href value above) with a POST
 
 ```
 {
-  "endpointUrl": "http://10.10.10.10:8080",
-  "username": "admin",
-  "password": "admin"
+  "endpointUrl": "http://<ip-address>:<port>",
+  "username": "<username>",
+  "password": "<password>"
 }
 
 ```
