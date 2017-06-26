@@ -85,7 +85,7 @@ public class AboutResource {
         }
         asyncResponse.resume(Response.ok(representation).build());
 
-        LOG.debug("Completed response");
+        LOG.debug("Completed the bad response");
 
 /*        nodeDiscovery.discover().thenAccept(nodes ->
         {
@@ -93,7 +93,7 @@ public class AboutResource {
             asyncResponse.resume(Response.ok(representation).build());
             LOG.debug("Completed response");
         });*/
-        LOG.debug("Exiting about the resource");
+        LOG.debug("Exiting about resource");
     }
 
     private List<String> requiredCapabilities() {
